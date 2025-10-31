@@ -22,7 +22,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'ball_chaser_node = ball_chaser.ball_chaser_node:main'
+            'ball_chaser_node = ball_chaser.ball_chaser_node:main',
+            'odom_to_tf_node = ball_chaser.odom_to_tf:main',  # <-- ADD THIS LINE
         ],
     },
 )

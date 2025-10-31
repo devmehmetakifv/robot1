@@ -84,6 +84,15 @@ def generate_launch_description():
         arguments=['0', '0', '0', '0', '0', '0', 'world', 'odom'],
         output='screen'
     )
+
+    # Static transform: camera_link -> sensor frame used by Gazebo messages
+    static_camera_frame = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='camera_sensor_frame_broadcaster',
+        arguments=['0', '0', '0', '0', '0', '0', 'camera_link', 'my_robot/base_footprint/camera'],
+        output='screen'
+    )
     
     # Bridge for cmd_vel (ROS <-> Gazebo)
     bridge_cmd_vel = Node(
@@ -183,6 +192,7 @@ def generate_launch_description():
         bridge_camera_info,
         bridge_tf,
         bridge_tf_static,
+        static_camera_frame,
         rviz,
         view_frames,
         ball_chaser

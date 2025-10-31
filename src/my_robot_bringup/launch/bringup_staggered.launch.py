@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 
 import os
-import time
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, ExecuteProcess, TimerAction, RegisterEventHandler
-from launch.event_handlers import OnProcessStart, OnProcessExit
+from launch.actions import IncludeLaunchDescription, ExecuteProcess, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
@@ -26,6 +24,8 @@ def generate_launch_description():
     robot_description_content = xacro.process_file(urdf_file).toxml()
     
     # Robot State Publisher
+    # This node publishes the static transforms from the URDF (e.g., base_link -> camera_link)
+    # and the dynamic transforms for the wheels based on /joint_states.
     robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -34,23 +34,6 @@ def generate_launch_description():
         parameters=[{
             'robot_description': robot_description_content,
             'use_sim_time': True
-        }]
-    )
-    
-    # Joint State Publisher
-    joint_state_publisher = Node(
-        package='joint_state_publisher',
-        executable='joint_state_publisher',
-        name='joint_state_publisher',
-        output='screen',
-        parameters=[{
-            'use_sim_time': True,
-            'robot_description': robot_description_content,
-            'publish_default_positions': True,
-            'default_positions': {
-                'left_wheel_joint': 0.0,
-                'right_wheel_joint': 0.0
-            }
         }]
     )
     
@@ -83,50 +66,33 @@ def generate_launch_description():
         ]
     )
     
-    # Bridges - Wait 6 seconds
+    # ONE BRIDGE TO RULE THEM ALL - Wait 6 seconds
+    # This single node bridges all necessary topics between Gazebo and ROS 2.
+    # The syntax '[gz.msgs...' means Gazebo -> ROS.
+    # The syntax ']gz.msgs...' means ROS -> Gazebo.
     bridges = TimerAction(
         period=6.0,
         actions=[
-            # Camera bridges (bidirectional)
             Node(
                 package='ros_gz_bridge',
                 executable='parameter_bridge',
-                arguments=['/camera/image_raw@sensor_msgs/msg/Image@gz.msgs.Image'],
-                name='camera_bridge',
-            ),
-            Node(
-                package='ros_gz_bridge',
-                executable='parameter_bridge',
-                arguments=['/camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo'],
-                name='camera_info_bridge',
-            ),
-            # cmd_vel bridge (bidirectional)
-            Node(
-                package='ros_gz_bridge',
-                executable='parameter_bridge',
-                arguments=['/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist'],
-                name='cmd_vel_bridge',
-            ),
-            # Odometry bridge (bidirectional)
-            Node(
-                package='ros_gz_bridge',
-                executable='parameter_bridge',
-                arguments=['/odometry@nav_msgs/msg/Odometry@gz.msgs.Odometry'],
-                name='odometry_bridge',
-            ),
-            # TF bridges (Gazebo <-> ROS)
-            Node(
-                package='ros_gz_bridge',
-                executable='parameter_bridge',
-                arguments=['/tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V'],
-                name='tf_bridge',
-            ),
-            Node(
-                package='ros_gz_bridge',
-                executable='parameter_bridge',
-                arguments=['/tf_static@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V'],
-                name='tf_static_bridge',
-            ),
+                arguments=[
+                    # Command velocity (ROS -> GZ)
+                    '/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist',
+                    # Odometry (GZ -> ROS)
+                    '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+                    # TF (GZ -> ROS) - Publishes odom->base_footprint
+                    '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
+                    # Joint States (GZ -> ROS) - Publishes wheel rotations
+                    '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
+                    # Camera Image (GZ -> ROS)
+                    '/camera/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+                    # Camera Info (GZ -> ROS)
+                    '/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo'
+                ],
+                parameters=[{'use_sim_time': True}],
+                output='screen'
+            )
         ]
     )
     
@@ -173,6 +139,20 @@ def generate_launch_description():
         ]
     )
 
+    # Static transform: camera_link -> sensor frame used by Gazebo messages
+    static_camera_frame = TimerAction(
+        period=6.0,
+        actions=[
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='camera_sensor_frame_broadcaster',
+                arguments=['0', '0', '0', '0', '0', '0', 'camera_link', 'my_robot/base_footprint/camera'],
+                output='screen'
+            )
+        ]
+    )
+
     # TF view_frames - Wait 10 seconds
     view_frames = TimerAction(
         period=10.0,
@@ -184,12 +164,14 @@ def generate_launch_description():
         ]
     )
     
+    # The final list of actions to launch.
+    # Note: The custom joint_state_publisher and odom_to_tf nodes have been removed.
     return LaunchDescription([
         gazebo,
         robot_state_publisher,
-        joint_state_publisher,
         spawn_robot,
         static_world_to_odom,
+        static_camera_frame,
         bridges,
         ball_chaser,
         rviz,
